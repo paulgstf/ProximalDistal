@@ -1,0 +1,684 @@
+---
+title: "Dilution Analysis REVISED"
+author: "Gustafson et. al."
+date: Aug 29, 2017
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+  ### global reproducibility of this output
+  set.seed(12345)
+```
+
+```{r}
+SENS <- F  ### set to TRUE to replace triangular with beta (or scaled-beta) dists
+```
+
+```{r}
+plot.custom <- F  
+### set to TRUE for production-level plots (option for author)
+### set to FASLE to embed plots in regular output report
+if (plot.custom) {
+  setwd("C:/Users/Paul Gustafson/ownCloud/RES_Dilution")
+  source("C:/Users/Paul Gustafson/ownCloud/OPUS2/Rcode/AuxFunctions.R")  
+}
+```
+
+
+## Set hyperparameters
+
+```{r}
+### case fatality rate
+rng.CFR <- c(0.01, 0.2)
+
+### sensitivity of surrogate for F
+rng.Sn.LC.Carman <- c(0.22, 0.26)
+
+rng.Sn.LC.Potter <- c(0.19, 0.3)
+
+rng.Sn.ILI.Potter <- rng.Sn.ILI.Lemaitre <- c(0.54, 0.78)
+
+rng.Sn.ILI.Hayward <- c(.76, .84)
+
+### specificity of surrogate for F
+rng.Sp.LC <- c(1,1)
+
+rng.Sp.ILI.Potter <- rng.Sp.ILI.Lemaitre <- c(0.50, 0.71)
+
+rng.Sp.ILI.Hayward <- c(.42, .55)
+
+### for ILI, neg dependence between Sn, Sp, due to case def
+rho.ILI <- (-0.95)
+
+### attack rate
+rng.a <- c(.07,.3)
+
+### intervention effect
+rng.k.Carman <- c(1, 1.37*1.35)
+rng.k.Potter <- c(1, 1.56*1.35)
+rng.k.Hayward <- c(1, 1.25*1.35)
+rng.k.Lemaitre <- c(1, 1.30*1.35)
+
+### mortality without influenza
+### if the study period were 1 year
+rng.b.YR <- c(.11, .26)
+
+### so for less than 1 year ...
+rng.b.Carman <- round((4.5/12)*rng.b.YR, 3)
+rng.b.Potter <- round((5/12)*rng.b.YR, 3)
+rng.b.Hayward <- rng.b.Lemaitre <- round((2.5/12)*rng.b.YR,3)
+
+```
+
+```{r, echo=F}
+tbl <- data.frame(
+  Parameter=
+  c("Case Fatality Rate", 
+    "Sensitivity","","","",
+    "Specificity","","",
+    "a",
+    "k","","","",
+    "b","","",""),
+  Instance=c("",
+             "(Lab-confirmed, Carman)","(Lab-confirmed, Potter)",
+             "(ILI Potter, Lemaitre)","(ILI Hayward)",
+             "(Lab-confirmed)","(ILI Potter, Lemaitre)","(ILI Hayward)",
+             "",
+             "(Carman)","(Potter)","(Lemaitre)","(Hayward)",
+             "(Carman)","(Potter)","(Lemaitre)","(Hayward)"),             
+  rbind(rng.CFR, 
+        rng.Sn.LC.Carman, rng.Sn.LC.Potter,   
+        rng.Sn.ILI.Potter, rng.Sn.ILI.Hayward,
+        rng.Sp.LC, rng.Sp.ILI.Potter, rng.Sp.ILI.Hayward, 
+        rng.a, 
+        rng.k.Carman, rng.k.Potter, rng.k.Lemaitre, rng.k.Hayward,
+        rng.b.Carman, rng.b.Potter, rng.b.Lemaitre, rng.b.Hayward))
+names(tbl)[3] <- "Lower"
+names(tbl)[4] <- "Upper"
+rownames(tbl) <- NULL
+```
+
+## Confirm settings in table format
+
+```{r, echo=F}
+tbl
+```
+
+
+```{r, echo=F}
+if (plot.custom) {
+  ### and export table to Word
+  library(rtf)
+  doc <- RTF("Tbl_prm_rngsRVS.doc")
+  addTable(doc, tbl)
+  done(doc)
+}  
+```
+
+## Specify study characteristics
+
+```{r}
+specs.carman <- list(
+  n.sites=20,
+  n.persite=72,
+  n.fstr=27,
+  y.cn=c(154,688),
+  y.tr=c(102,749),
+  fstr.cn=c(18,269),
+  fstr.tr=c(14,258))
+
+specs.potter.lc <- list(
+  n.sites=12,
+  n.persite=90,
+  n.fstr=20,
+  y.cn=c(98,569),
+  y.tr=c(50,490),
+  fstr.cn=c(6,107),
+  fstr.tr=c(5,118))
+
+specs.potter.ili <- specs.potter.lc
+specs.potter.ili$n.fstr=90
+specs.potter.ili$fstr.cn=c(42,569)
+specs.potter.ili$fstr.tr=c(22,490)
+
+specs.lemaitre <- list(
+  n.sites=40,
+  n.persite=85,
+  n.fstr=85,
+  y.cn=c(100,1678),
+  y.tr=c(89,1722),
+  fstr.cn=c(163,1678),
+  fstr.tr=c(116,1722))
+
+specs.hayward <- list(
+ n.sites=44,
+ n.persite=59,
+ n.fstr=59, 
+ y.cn=c(203,1371),
+ y.tr=c(140,1233),
+ fstr.cn=c(300,1371),
+ fstr.tr=c(142,1233))
+```
+
+```{r, echo=F}
+tbl <- data.frame(
+  c("Carman", "Potter (LC)", "Potter (ILI)", "Lemaitre", "Hayward"),
+  rbind(
+  unlist(specs.carman), 
+  unlist(specs.potter.lc), unlist(specs.potter.ili),
+  unlist(specs.lemaitre),  unlist(specs.hayward)))
+
+names(tbl) <- c("Study", "n.fac", "n.per", "n*", "Y.cn", "n", "Y.tr", "n", "F*.cn", "n", "F*.tr", "n")
+
+rownames(tbl) <- NULL
+
+tbl <- data.frame(
+rbind(
+  c("Carman", specs.carman$n.sites, 
+    specs.carman$y.cn[2], "", specs.carman$y.cn[1],
+    specs.carman$y.tr[2], "", specs.carman$y.tr[1]),
+  
+  c("","",specs.carman$fstr.cn[2], specs.carman$fstr.cn[1],"",
+          specs.carman$fstr.tr[2], specs.carman$fstr.tr[1],""),
+  
+  c("Potter (ILI)", specs.potter.ili$n.sites, 
+    specs.potter.ili$y.cn[2], specs.potter.ili$fstr.cn[1], specs.potter.ili$y.cn[1],
+    specs.potter.ili$y.tr[2], specs.potter.ili$fstr.tr[1], specs.potter.ili$y.tr[1]),
+  
+  c("(LTI)","",specs.potter.lc$fstr.cn[2], specs.potter.lc$fstr.cn[1],"",
+                 specs.potter.lc$fstr.tr[2], specs.potter.lc$fstr.tr[1],""),
+  c("Lemaitre", specs.lemaitre$n.sites, 
+    specs.lemaitre$y.cn[2], specs.lemaitre$fstr.cn[1],specs.lemaitre$y.cn[1],
+    specs.lemaitre$y.tr[2], specs.lemaitre$fstr.tr[1],specs.lemaitre$y.tr[1]),
+  c("Hayward", specs.hayward$n.sites, 
+    specs.hayward$y.cn[2], specs.hayward$fstr.cn[1],specs.hayward$y.cn[1],
+    specs.hayward$y.tr[2], specs.hayward$fstr.tr[1],specs.hayward$y.tr[1])
+  )
+)
+
+names(tbl) <- c("Study", "# fac.", 
+                "# res.", "# infl.","# deaths",
+                "# res.", "# infl.","# deaths")
+                
+rownames(tbl) <- NULL
+```
+
+## Confirm characteristics in table format
+
+```{r,echo=F}
+print("control columns to left, treatment columns to right")
+tbl
+```
+
+```{r, echo=F}
+if (plot.custom) {
+  ### and export it
+  library(rtf)
+  doc <- RTF("Tbl_study_charsRVS.doc")
+  addTable(doc, tbl)
+  done(doc)
+}  
+```
+
+```{r, echo=F} 
+### random generation from a symmetric triangluar
+### distribution between a and b
+rtri <- function(n,a=0,b=1) {
+  a + (b-a)*(runif(n)+runif(n))/2  
+}
+```
+
+```{r, echo=F}
+if (SENS) {
+  rtri <- function(n, a, b) {
+      if (a==b) { opt <- rep(a,n)}
+      else {
+        if (b<1) {
+        ### regular beta
+        mu <- (a+b)/2
+        sg <- (b-a)/4
+        }  else {
+        ### scale to (1,5)
+        mu <- ((a+b)/2 -1)/4
+        sg <- ((b-a)/4)/4
+        }      
+        shp.sum <- mu*(1-mu)/sg^2 - 1
+        shp.a <- shp.sum*mu
+        shp.b <- shp.sum*(1-mu)
+    
+        opt <- rbeta(n, shp.a, shp.b)
+        if (b>1) { opt <- 1 + 4*opt}
+      }
+    opt
+  }
+} 
+```
+
+```{r, echo=F}
+ptri <- function(x, a=0,b=1) {
+  md <- (a+b)/2
+  ndx <- (x<=md); ans <- rep(NA, length(x))
+  ans[ndx] <- 0.5* ( (x[ndx]-a) / (md-a) )^2
+  ans[!ndx] <- 1 - 0.5*( (b-x[!ndx]) / (b-md) )^2
+ans
+}
+```
+
+```{r, echo=F}
+if (SENS) {
+  ptri <- function(x, a, b) {
+    if (b<1) {
+      ### regular beta
+      mu <- (a+b)/2
+      sg <- (b-a)/4
+    }  else {
+      ### scale to (1,5)
+      mu <- ((a+b)/2 -1)/4
+      sg <- ((b-a)/4)/4
+    }      
+    shp.sum <- mu*(1-mu)/sg^2 - 1
+    shp.a <- shp.sum*mu
+    shp.b <- shp.sum*(1-mu)
+    
+    if (b<1) {
+      opt <- pbeta(x, shp.a, shp.b)
+    } else {
+      opt <- pbeta((x-1)/4, shp.a, shp.b)
+    }  
+  opt
+  }
+} 
+```
+
+
+```{r, echo=F}
+qtri <- function(p, a=0,b=1) {
+  md <- (a+b)/2
+  ndx <- (p<=0.5); ans <- rep(NA, length(p))
+  ans[ndx] <- a + sqrt(2*p[ndx])*(md-a)
+  ans[!ndx] <- b - sqrt(2*(1-p[!ndx]))*(b-md)
+ans
+}
+```
+
+```{r, echo=F}
+if (SENS) {
+  qtri <- function(p, a, b) {
+    if (b<1) {
+      ### regular beta
+      mu <- (a+b)/2
+      sg <- (b-a)/4
+    }  else {
+      ### scale to (1,5)
+      mu <- ((a+b)/2 -1)/4
+      sg <- ((b-a)/4)/4
+    }      
+    shp.sum <- mu*(1-mu)/sg^2 - 1
+    shp.a <- shp.sum*mu
+    shp.b <- shp.sum*(1-mu)
+    
+    opt <- qbeta(p, shp.a, shp.b)
+    if (b>1) {
+      opt <- 1+ 4*opt
+    }
+  opt
+  }
+} 
+```
+
+
+## Function to generate the Step 1 plot
+
+Input is an ensemble of CFR values
+
+```{r}
+FirstPlot <- function(cfr, dat.obs, xyl=c(-.05,.15)) {
+
+  dy.hat <- dat.obs$y.cn[1]/dat.obs$y.cn[2] -
+            dat.obs$y.tr[1]/dat.obs$y.tr[2]
+
+  dfstr.hat <- dat.obs$fstr.cn[1]/dat.obs$fstr.cn[2] -
+               dat.obs$fstr.tr[1]/dat.obs$fstr.tr[2]            
+
+  plot(-2,-2, xlim=xyl, ylim=xyl, 
+       xlab=expression(Delta(F)), 
+       ylab=expression(Delta(Y)),
+       main="(1)")
+  polygon(c(0,1,1), c(0,0,1), col=gray(0.75),border=NA)
+  abline(v=0); abline(h=0)
+  points(dfstr.hat,dy.hat, pch=22)
+
+  for (slp in quantile(cfr, (1:15)/16)) {
+    abline(c(0, slp))
+  }
+}
+```
+
+## Function to generate the Step 2 plot
+
+**Additional** inputs are ensembles of sensitivity and specificity values
+
+```{r}
+SecondPlot <- function(cfr, sn, sp, dat.obs, xyl=c(-.05,.15)) {
+  dy.hat <- dat.obs$y.cn[1]/dat.obs$y.cn[2] -
+            dat.obs$y.tr[1]/dat.obs$y.tr[2]
+  dfstr.hat <- dat.obs$fstr.cn[1]/dat.obs$fstr.cn[2] -
+               dat.obs$fstr.tr[1]/dat.obs$fstr.tr[2]      
+  plot(-2,-2, xlim=xyl, ylim=xyl, 
+     xlab=expression(Delta(F["*"])),
+     ylab=expression(Delta(Y)), 
+     main="(2)")
+  polygon(c(0,1,1),c(0,0,1), col=gray(.75),border=NA)
+  abline(v=0); abline(h=0)
+  points(dfstr.hat,dy.hat, pch=22)
+
+  for (slp in quantile(cfr/(sn+sp-1), (1:15)/16)) {
+    abline(c(0, slp))
+  }  
+}
+```
+
+## Function to generate the Step 3 plot
+
+**Additional** inputs are ensembles of $a$ and $k$ values (giving rise to $\Delta_F$ values).
+
+```{r}
+ThirdPlot <- function(cfr, sn, sp, deltf,
+                  dat.obs, xyl=c(-.05,.15)) {
+
+  dy.hat <- dat.obs$y.cn[1]/dat.obs$y.cn[2] -
+            dat.obs$y.tr[1]/dat.obs$y.tr[2]
+  dfstr.hat <- dat.obs$fstr.cn[1]/dat.obs$fstr.cn[2] -
+               dat.obs$fstr.tr[1]/dat.obs$fstr.tr[2]  
+  plot(-2,-2, xlim=xyl, ylim=xyl, 
+     xlab=expression(Delta(F["*"])),
+     ylab=expression(Delta(Y)),
+     main="(3)")
+  polygon(c(0,1,1),c(0,0,1), col=gray(.75),border=NA)
+  abline(v=0)
+  abline(h=0)
+  points(dfstr.hat,dy.hat, pch=22)
+  
+  for (i in 1:length(cfr)) {
+    points((sn[i]+sp[i]-1)*deltf[i], cfr[i]*deltf[i], cex=.005, pch=20)
+  }  
+}
+```
+
+## Function to generate the Step 4 plot
+
+**Additional** input is an ensemble of b values
+
+```{r}
+FourthPlot <- function(cfr, sn, sp, a, k, b, specs,
+                       xyl=c(-0.05,.15)) {
+
+  dy.hat <- specs$y.cn[1]/specs$y.cn[2] -
+            specs$y.tr[1]/specs$y.tr[2]
+  dfstr.hat <- specs$fstr.cn[1]/specs$fstr.cn[2] -
+               specs$fstr.tr[1]/specs$fstr.tr[2] 
+
+  plot(-2,-2, xlim=xyl, ylim=xyl, 
+     xlab=expression(paste("Est. ", Delta(F["*"]))), 
+     ylab=expression(paste("Est. ", Delta(Y))),
+     main="(4)")
+  polygon(c(0,1,1),c(0,0,1), col=gray(.75),border=NA)
+  abline(v=0); abline(h=0)
+  points(dfstr.hat,dy.hat, pch=22)
+
+  for (i in 1:length(cfr)) {
+    
+    smry.fstr <- smry.f <- smry.y <- rep(0,4) 
+
+    ### control facilities 
+    for (j in 1:(specs$n.sites/2)) {
+      f <- rbinom(specs$n.persite, size=1, prob=rbeta(1, 1, 1/a[i]-1))
+      fstr <- rbinom(specs$n.persite, size=1, prob=(1-f)*(1-sp[i])+f*sn[i])
+      y <- rbinom(specs$n.persite, size=1, prob=runif(1, 0, b[i])+f*cfr[i])
+      smry.f <- smry.f + c(0,0,specs$n.fstr,sum(f[1:specs$n.fstr]))
+      smry.fstr <- smry.fstr + c(0,0,specs$n.fstr,sum(fstr[1:specs$n.fstr]))
+      smry.y <- smry.y + c(0,0,specs$n.persite,sum(y))
+    }  
+  
+    ### case facilities 
+    for (j in 1:(specs$n.sites/2)) {
+      f <- rbinom(specs$n.persite, size=1, prob=rbeta(1, 1, k[i]/a[i]-1))
+      fstr <- rbinom(specs$n.persite, size=1, prob=(1-f)*(1-sp[i])+f*sn[i])
+      y <- rbinom(specs$n.persite, size=1, prob=runif(1, 0, b[i])+f*cfr[i])
+      smry.f <- smry.f + c(specs$n.fstr,sum(f[1:specs$n.fstr]),0,0)
+      smry.fstr <- smry.fstr + c(specs$n.fstr,sum(fstr[1:specs$n.fstr]),0,0)
+      smry.y <- smry.y + c(specs$n.persite,sum(y),0,0)  
+    }
+
+    points(smry.fstr[4]/smry.fstr[3] - smry.fstr[2]/smry.fstr[1],
+           smry.y[4]/smry.y[3] - smry.y[2]/smry.y[1],cex=.005, 
+           pch=20)
+  }
+}  
+```
+
+
+## Carry out the Carman assessment
+
+```{r}
+### number of Monte Carlo draws
+n.rep <- 10000
+
+### axis range for these plots
+xyl <- c(-0.1,0.14)
+
+### risk difference in mortality (flu minus no-flu)
+cfr <- rtri(n.rep, rng.CFR[1], rng.CFR[2])
+
+### now can do first plot
+
+### sens/spec for flu surrogate
+sn <- rtri(n.rep, rng.Sn.LC.Carman[1], rng.Sn.LC.Carman[2])
+sp <- rtri(n.rep, rng.Sp.LC[1], rng.Sp.LC[2])
+
+### now can do second plot
+
+### a and k values
+a <- rtri(n.rep, rng.a[1],rng.a[2])
+k <- rtri(n.rep, rng.k.Carman[1],rng.k.Carman[2])
+
+### now can do third plot
+
+### b values
+b <- rtri(n.rep, rng.b.Carman[1], rng.b.Carman[2])
+
+### now can do fourth plot
+```
+
+```{r, echo=F}
+
+### do the plotting
+
+if (plot.custom) {
+  pdf.PG("Fig_Carman_RVS.pdf",2,2, ttlspc=T)
+  ### and extra nudge to outer margins
+  par(oma=.1+c(0,0,0,0.2))
+  ### nudge down the axis numbering
+  par(cex.axis=0.75)
+} else {
+  par(mfrow=c(2,2))
+}
+
+FirstPlot(cfr, xyl=xyl, 
+  dat.obs=specs.carman[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+SecondPlot(cfr, sn, sp, xyl=xyl, 
+  dat.obs=specs.carman[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+ThirdPlot(cfr, sn, sp, deltf=a*(1-1/k), xyl=xyl,
+  dat.obs=specs.carman[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+FourthPlot(cfr, sn, sp, a, k, b, xyl=xyl, 
+  specs=specs.carman)
+
+graphics.off()
+```
+
+
+## Potter, lab-confirmed influenza
+
+Same sequence of four plots 
+as previously, but with the following settings changed.
+
+
+```{r}
+sn <- rtri(n.rep, rng.Sn.LC.Potter[1], rng.Sn.LC.Potter[2])
+k <- rtri(n.rep, rng.k.Potter[1], rng.k.Potter[2])
+b <- rtri(n.rep, rng.b.Potter[1], rng.b.Potter[2])
+xyl <- c(-0.10,0.17) ### plotting range
+```
+
+
+```{r, echo=F}
+
+if (plot.custom) {
+  pdf.PG("Fig_Potter_LC_RVS.pdf",2,2, ttlspc=T)
+  ### and extra nudge to outer margins
+  par(oma=.1+c(0,0,0,0.2))
+  ### nudge down the axis numbering
+  par(cex.axis=0.75)
+} else {
+  par(mfrow=c(2,2))
+}
+
+FirstPlot(cfr, xyl=xyl, 
+  dat.obs=specs.potter.lc[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+SecondPlot(cfr, sn, sp, xyl=xyl, 
+  dat.obs=specs.potter.lc[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+ThirdPlot(cfr, sn, sp, deltf=a*(1-1/k), xyl=xyl,
+  dat.obs=specs.potter.lc[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+FourthPlot(cfr, sn, sp, a, k, b, xyl=xyl,
+  specs=specs.potter.lc)
+
+graphics.off()
+```
+
+## Potter, ILI
+
+All the settings are as above, except for
+
+```{r}
+nrm1 <- rnorm(n.rep); nrm2 <- rho.ILI*nrm1 + sqrt(1-rho.ILI^2)*rnorm(n.rep)
+sn <- qtri(pnorm(nrm1), rng.Sn.ILI.Potter[1], rng.Sn.ILI.Potter[2])
+sp <- qtri(pnorm(nrm2), rng.Sp.ILI.Potter[1], rng.Sp.ILI.Potter[2])
+
+xyl <- c(-0.12,0.18) ### axis range
+```
+
+
+```{r, echo=F}
+if (plot.custom) {
+  pdf.PG("Fig_Potter_ILI_RVS.pdf",2,2, ttlspc=T)
+  ### and extra nudge to outer margins
+  par(oma=.1+c(0,0,0,0.2))
+  ### nudge down the axis numbering
+  par(cex.axis=0.75)
+} else {
+  par(mfrow=c(2,2))
+}
+
+FirstPlot(cfr, xyl=xyl, 
+  dat.obs=specs.potter.ili[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+SecondPlot(cfr, sn, sp, xyl=xyl, 
+  dat.obs=specs.potter.ili[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+ThirdPlot(cfr, sn, sp, deltf=a*(1-1/k), xyl=xyl,
+  dat.obs=specs.potter.ili[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+FourthPlot(cfr, sn, sp, a, k, b, xyl=xyl,
+  specs=specs.potter.ili)
+
+graphics.off()
+```
+
+## Lemaitre, ILI
+
+All the settings are as above, except for
+
+```{r}
+k <- rtri(n.rep, rng.k.Lemaitre[1], rng.k.Lemaitre[2])
+b <- rtri(n.rep, rng.b.Lemaitre[1], rng.b.Lemaitre[2])
+xyl <- c(-0.07,0.11) ### axis range
+```
+
+
+```{r, echo=F}
+if (plot.custom) {
+  pdf.PG("Fig_Lemaitre_RVS.pdf",2,2, ttlspc=T)
+  ### and extra nudge to outer margins
+  par(oma=.1+c(0,0,0,0.2))
+  ### nudge down the axis numbering
+  par(cex.axis=0.75)
+} else {
+  par(mfrow=c(2,2))
+}
+
+FirstPlot(cfr, xyl=xyl, 
+  dat.obs=specs.lemaitre[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+SecondPlot(cfr, sn, sp, xyl=xyl, 
+  dat.obs=specs.lemaitre[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+ThirdPlot(cfr, sn, sp, deltf=a*(1-1/k), xyl=xyl,
+  dat.obs=specs.lemaitre[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+FourthPlot(cfr, sn, sp, a, k, b, xyl=xyl,
+  specs=specs.lemaitre)
+
+graphics.off()
+```
+
+## Hayward, ILI
+
+All the settings are as above, except for
+
+```{r}
+nrm1 <- rnorm(n.rep); nrm2 <- rho.ILI*nrm1 + sqrt(1-rho.ILI^2)*rnorm(n.rep)
+sn <- qtri(pnorm(nrm1), rng.Sn.ILI.Hayward[1], rng.Sn.ILI.Hayward[2])
+sp <- qtri(pnorm(nrm2), rng.Sp.ILI.Hayward[1], rng.Sp.ILI.Hayward[2])
+
+k <- rtri(n.rep, rng.k.Hayward[1],rng.k.Hayward[2])
+b <- rtri(n.rep, rng.b.Hayward[1], rng.b.Hayward[2])
+xyl <- c(-0.09,0.15) ### axis range
+```
+
+```{r, echo=F}
+if (plot.custom) {
+  pdf.PG("Fig_Hayward_RVS.pdf",2,2, ttlspc=T)
+  ### and extra nudge to outer margins
+  par(oma=.1+c(0,0,0,0.2))
+  ### nudge down the axis numbering
+  par(cex.axis=0.75)
+} else {
+  par(mfrow=c(2,2))
+}
+
+FirstPlot(cfr, xyl=xyl,
+  dat.obs=specs.hayward[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+SecondPlot(cfr, sn, sp, xyl=xyl,  
+  dat.obs=specs.hayward[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+ThirdPlot(cfr, sn, sp, deltf=a*(1-1/k), xyl=xyl,
+  dat.obs=specs.hayward[c("y.cn","y.tr","fstr.cn","fstr.tr")])
+
+FourthPlot(cfr, sn, sp, a, k, b, xyl=xyl,
+  specs=specs.hayward)
+
+graphics.off()
+```
+
+

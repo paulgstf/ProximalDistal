@@ -1,7 +1,7 @@
 ---
-title: "Dilution Analysis REVISED"
-author: "Gustafson et. al."
-date: Aug 29, 2017
+title: "Plausibility Analysis"
+author: "Paul Gustafson"
+date: March 2, 2019
 output: pdf_document
 ---
 
@@ -23,7 +23,7 @@ plot.custom <- F
 ### set to TRUE for production-level plots (option for author)
 ### set to FASLE to embed plots in regular output report
 if (plot.custom) {
-  setwd("C:/Users/Paul Gustafson/ownCloud/RES_Dilution")
+  setwd("C:/Users/Paul Gustafson/ownCloud/RES_ProximalDistal")
   source("C:/Users/Paul Gustafson/ownCloud/OPUS2/Rcode/AuxFunctions.R")  
 }
 ```
